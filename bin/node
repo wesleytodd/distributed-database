@@ -1,0 +1,20 @@
+#!/usr/bin/env node
+var Server = require('../server');
+
+var argv = require('minimist')(process.argv.slice(2), {
+	string: [
+		'cluster',
+		'port',
+		'db'
+	],
+	alias: {
+		c: 'cluster',
+		p: 'port',
+		d: 'db'
+	}
+});
+
+// Start node
+var port = argv.port || 9753;
+var db = argv.db || 'test.db';
+var server = new Server(db, port, argv.cluster);
