@@ -3,6 +3,7 @@ var net = require('net');
 var Store = require('./store');
 var KBucket = require('k-bucket');
 var crypto = require('crypto');
+var parallel = require('run-parallel');
 
 var Server = module.exports = function(loc, port, clusterPort) {
 	this.db = new Store(loc);
@@ -48,6 +49,7 @@ Server.prototype.put = function(item, done) {
 	}, 1);
 
 	if (nodes[0].rpc === this) {
+		console.log('put', item.value);
 		var hash = this.db.put(item, function(err) {
 			if (err) {
 				console.error(err);
@@ -67,6 +69,7 @@ Server.prototype.get = function(hash, done) {
 	}, 1);
 
 	if (nodes[0].rpc === this) {
+		console.log('get', hash);
 		this.db.get(hash, function(err, data) {
 			if (err) {
 				console.error(err);
@@ -86,6 +89,7 @@ Server.prototype.del = function(hash, done) {
 	}, 1);
 
 	if (nodes[0].rpc === this) {
+		console.log('del', hash);
 		this.db.del(hash, function(err, data) {
 			if (err) {
 				console.error(err);
@@ -113,7 +117,7 @@ Server.prototype._joinCluster = function(node, done) {
 				port: n.port
 			};
 		});
-		done(JSON.stringify(nodes));
+		done(nodes);
 	}.bind(this));
 };
 
@@ -128,11 +132,30 @@ Server.prototype.joinCluster = function(node, done) {
 			rpc: rpc
 		});
 
+		// Send the join to other node
 		rpc.joinCluster({
 			host: this.host,
 			port: this.port
 		}, function(others) {
-			done();
+
+			// Add all these new hosts to our k-bucket
+			var fncs = (others || []).map(function(node) {
+				return function(cb) {
+					// Dont add if it already exists
+					var exists = this.cluster.get(serverId(node.host, node.port));
+					if (exists) {
+						return cb();
+					}
+					
+					console.log('adding newly found node');
+					this.joinCluster({
+						host: node.host,
+						port: node.port
+					}, cb);
+				}.bind(this);
+			}.bind(this));
+
+			parallel(fncs, done);
 		}.bind(this));
 	}.bind(this));
 	var c = net.connect(node.port);
@@ -140,6 +163,7 @@ Server.prototype.joinCluster = function(node, done) {
 };
 
 Server.prototype.addToCluster = function(node) {
+	console.log('adding: ', node.port);
 	this.cluster.add({
 		id: serverId(node.host, node.port),
 		host: node.host,
